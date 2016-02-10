@@ -15,29 +15,14 @@
 /**
  * @fileoverview Provides the custom functions DATEADD and DATESUBTRACT and
  * the helper functions that they use.
+ * @OnlyCurrentDoc
  */
-
-/*
- * Load the Moment library for date manipulation. Include it in your script
- * using the project key "MHMchiX6c1bwSqGM1PZiW_PxhMjh3Sh48".
- */
-var moment = Moment.load();
 
 /**
  * The list of valid unit identifiers.
  */
 var VALID_UNITS = ['year', 'month', 'week', 'day', 'hour', 'minute', 'second',
     'millisecond'];
-
-/**
- * The epoch date used by Google Sheets.
- */
-var SHEETS_EPOCH = '12/30/1899 0:00:00';
-
-/**
- * The number of seconds in a day.
- */
-var SECONDS_PER_DAY = 86400;
 
 /**
  * Runs when the add-on is installed.
@@ -72,52 +57,51 @@ function use() {
 
 /**
  * Adds some amount of time to a date.
- * @param {Date} date The date to add to.
- * @param {string} unit The unit of time to add. Possible values include:
+ * @param {Date|Range} date The date to add to, or a range of dates.
+ * @param {string|Range} unit The unit of time to add, or a range of units.
+ *    Possible values include:
  *    `years`, `months`, `weeks`, `days`, `hours`, `minutes`, `seconds`, and
  *    `milliseconds`. You can also use the shorthand notation for these units
  *    which are `y`, `M`, `w`, `d`, `h`, `m`, `s`, `ms` respectively.
- * @param {number} amount The amount of the specified unit to add.
+ * @param {number|Range} amount The amount of the specified unit to add, or a
+ *    range of amounts.
  * @return {Date} The new date.
  * @customFunction
  */
 function DATEADD(date, unit, amount) {
-  date = normalizeDate(date);
-  validateParameters(date, unit, amount);
-  return moment(date).add(unit, amount).toDate();
+  var args = toArray(arguments);
+  return multimap(args, function(date, unit, amount) {
+    validateParameters(date, unit, amount);
+    return moment(date).add(unit, amount).toDate();
+  });
+}
+
+/**
+ * @customFunction
+ */
+function DATETEST(date, unit, amount) {
+  return JSON.stringify(DATEADD(date, unit, amount));
 }
 
 /**
  * Subtracts some amount of time from a date.
- * @param {Date} date The date to subtract from.
- * @param {string} unit The unit of time to subtract. Possible values include:
+ * @param {Date|Range} date The date to subtract from, or a range of dates.
+ * @param {string|Range} unit The unit of time to subtract, or a range of units.
+ *    Possible values include:
  *    `years`, `months`, `weeks`, `days`, `hours`, `minutes`, `seconds`, and
  *    `milliseconds`. You can also use the shorthand notation for these units
  *    which are `y`, `M`, `w`, `d`, `h`, `m`, `s`, `ms` respectively.
- * @param {number} amount The amount of the specified unit to subtract.
+ * @param {number|Range} amount The amount of the specified unit to subtract, or
+ *     a range of amounts.
  * @return {Date} The new date.
  * @customFunction
  */
 function DATESUBTRACT(date, unit, amount) {
-  date = normalizeDate(date);
-  validateParameters(date, unit, amount);
-  return moment(date).subtract(unit, amount).toDate();
-}
-
-/**
- * Normalizes a date value from Google Sheets, as they can sometimes be passed
- * as number values.
- * @param {?} date The date value.
- * @return {Date} The normalized date value.
- */
-function normalizeDate(date) {
-  if (typeof date == 'number') {
-    var days = Math.floor(date);
-    var seconds = (date - days) * SECONDS_PER_DAY;
-    date = moment(SHEETS_EPOCH).add(days, 'days')
-        .add(seconds, 'seconds').toDate();
-  }
-  return date;
+  var args = toArray(arguments);
+  return multimap(args, function(date, unit, amount) {
+    validateParameters(date, unit, amount);
+    return moment(date).subtract(unit, amount).toDate();
+  });
 }
 
 /**
@@ -140,4 +124,61 @@ function validateParameters(date, unit, amount) {
     throw Utilities.formatString('Parameter 3 expects a number value, but ' +
         '"%s" cannot be coerced to a number.', amount);
   }
+}
+
+/**
+ * Applies a function to a set of arguments, looping over arrays in those
+ * arguments. Similar to Array.map, except that it can map the function across
+ * multiple arrays, passing forward non-array values.
+ * @param {Array} args The arguments to map against.
+ * @param {Function} func The function to apply.
+ * @return {Array} The results of the mapping.
+ */
+function multimap(args, func) {
+  // Determine the length of the arrays.
+  var lengths = args.map(function(arg) {
+    if (arg instanceof Array) {
+      return arg.length;
+    } else {
+      return 0;
+    }
+  });
+  var max = Math.max.apply(null, lengths);
+
+  // If there aren't any arrays, just call the function.
+  if (max == 0) {
+    return func.apply(null, args);
+  }
+
+  // Ensure all the arrays are the same length.
+  // Arrays of length 1 are exempted, since they are assumed to be rows/columns
+  // that should apply to each row/column in the other sets.
+  lengths.forEach(function(length) {
+    if (length != max && length > 1) {
+      throw 'All input ranges must be the same size: ' + max;
+    }
+  });
+
+  // Recursively apply the map function to each element in the arrays.
+  var result = []
+  for (var i = 0; i < max; i++) {
+    var params = args.map(function(arg) {
+      if (arg instanceof Array) {
+        return arg.length == 1 ? arg[0] : arg[i];
+      } else {
+        return arg;
+      }
+    });
+    result.push(multimap(params, func));
+  }
+  return result;
+}
+
+/**
+ * Convert the array-like arguments object into a real array.
+ * @param {Arguments} args The arguments object to convert.
+ * @return {Array} The equivalent array.
+ */
+function toArray(args) {
+  return Array.prototype.slice.call(args);
 }
